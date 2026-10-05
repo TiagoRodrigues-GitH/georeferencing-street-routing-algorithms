@@ -1,0 +1,158 @@
+# Architecture (draft)
+
+**Author:** Tiago Rodrigues (UTFPR) · **Version:** 0.1, 2026-10-04 · Structure follows a reduced arc42 template
+(Starke & Hruschka) with C4-style views (Brown).
+
+## 1. Goals and quality attributes
+
+| Quality (ISO/IEC 25010) | Concrete requirement |
+|---|---|
+| Functional correctness | Exact algorithms return the true shortest path (checked against NetworkX on every test graph). |
+| Reproducibility | Every stage is a command with a config file; seeds fixed; data versions recorded. |
+| Modifiability | A new path-finding algorithm or segmentation model is added without editing existing ones (Open/Closed). |
+| Testability | Each stage is a pure function of its inputs where possible; small synthetic graphs and rasters in tests. |
+| Performance | Routing benchmark on the Londrina graph (~10^4-10^5 edges) runs on a laptop CPU; segmentation trains on a 6 GB GPU. |
+| Usability | The web map works on a phone and shows every algorithm's exploration step by step. |
+
+## 2. Context (C4 level 1)
+
+```mermaid
+flowchart LR
+  user([Researcher / visitor]) --> web[Web map]
+  web --> artefacts[(Graph JSON, routes, metrics)]
+  pipeline[Python pipeline] --> artefacts
+  pipeline --> inpe[(INPE STAC: CBERS-4A)]
+  pipeline --> osm[(OpenStreetMap)]
+  pipeline --> gob[(Google Open Buildings)]
+  pipeline --> ibge[(IBGE boundary)]
+```
+
+The pipeline runs offline and publishes static artefacts; the web map is a static site (GitHub Pages) that runs
+the algorithms in the browser on the published graph. No server, no user data stored.
+
+## 3. Building blocks (C4 level 2-3)
+
+Pipes-and-filters for the data flow (Buschmann et al., *POSA vol. 1*); each filter is a module with one
+responsibility.
+
+```mermaid
+flowchart TD
+  subgraph pre [Pre-processing]
+    A[sources: fetch + cache] --> B[raster: reproject, tile, normalise, cloud mask]
+    A --> C[labels: rasterise roads and buildings]
+  end
+  subgraph proc [Processing]
+    B --> D[segmentation: model zoo + training]
+    C --> D
+    D --> E[vectorise: skeleton -> graph; masks -> polygons]
+  end
+  subgraph post [Post-processing]
+    E --> F[graph: clean, compare with OSM - APLS]
+    A --> G[osm_graph: OSMnx road network]
+    F --> H[routing: PathFinder strategies]
+    G --> H
+    H --> I[benchmark: metrics + statistics]
+    H --> J[export: graph and traces to JSON]
+    J --> K[web map]
+  end
+```
+
+| Package | Responsibility | Key abstraction |
+|---|---|---|
+| `sources` | Download and cache each dataset; record version and licence | `DataSource` interface (one class per source) |
+| `raster` | Reprojection to EPSG:31982, tiling, normalisation, cloud masking | pure functions over `rasterio` datasets |
+| `labels` | Rasterise vector roads/buildings into masks aligned with the tiles | pure functions |
+| `segmentation` | Models, training loop, inference; model choice by config | `SegmentationModel` (registry, Factory) |
+| `vectorise` | Road mask -> skeleton -> graph; building mask -> polygons | pure functions |
+| `graph` | Graph cleaning, simplification, APLS against a reference graph | `RoadGraph` wrapper over NetworkX |
+| `routing` | Path-finding algorithms with a common interface and exploration traces | `PathFinder` (Strategy) |
+| `benchmark` | Origin-destination sampling, metrics, paired statistical tests | `Experiment` |
+| `export` | Graph, routes and traces to compact JSON for the web | pure functions |
+| `web/` | TypeScript + MapLibre map, origin/destination input, animation player | `AlgorithmPlayer` |
+
+### Routing design
+
+```text
+PathFinder (interface)
+  find(graph, source, target, weight) -> RouteResult(path, cost, expanded_nodes, runtime_s, trace)
+
+Exact:         Dijkstra · A* (haversine heuristic) · bidirectional Dijkstra · ALT · contraction hierarchies
+Heuristic:     greedy best-first · beam search
+Metaheuristic: ant colony optimisation · genetic algorithm (variable-length path chromosomes)
+               · simulated annealing · particle swarm (path encodings)
+Multi-objective: NSGA-II over (distance, travel time, number of turns)
+```
+
+Each algorithm is one class implementing `PathFinder` (Strategy pattern, GoF), registered by name so the benchmark
+and the web map discover it without edits (Open/Closed, Dependency Inversion). Every algorithm emits the same
+`trace` (nodes visited per step), which the web player animates identically for all algorithms. The exact
+algorithms are the reference: metaheuristics are scored by optimality gap, success rate, runtime and expanded
+nodes over many origin-destination pairs, with paired tests across seeds.
+
+## 4. Runtime view: one benchmark run
+
+1. `osm_graph` builds or loads the drivable network of Londrina (OSMnx), simplified, with edge lengths and speeds.
+2. `benchmark` samples N origin-destination pairs (stratified by straight-line distance) with a fixed seed.
+3. For each pair and each `PathFinder`: run, record metrics and the trace; metaheuristics run several seeds.
+4. Results go to a tidy table; statistics (Friedman + Nemenyi or Wilcoxon-Holm) and plots are produced.
+5. `export` writes the graph, a sample of traces and the summary for the web map.
+
+## 5. Decisions (ADR summary)
+
+| # | Decision | Reason |
+|---|---|---|
+| 1 | Start with the OpenStreetMap graph (milestone 1) before images | Delivers the routing study and demo early; gives the reference graph for APLS later |
+| 2 | CBERS-4A 2 m as the image source | Free (CC BY 4.0), Brazilian, fine enough for urban streets; Sentinel-2 at 10 m is too coarse |
+| 3 | Weak labels from OSM + Google Open Buildings, checked on a hand-labelled sample | No manual annotation of the whole city |
+| 4 | Algorithms run in the browser on a static graph | No server to maintain; same code path for every algorithm's animation |
+| 5 | SIRGAS 2000 / UTM 22S (EPSG:31982) for all metric work | Official Brazilian datum; metres for lengths and APLS |
+
+## 6. Risks
+
+- CBERS-4A cloud cover and 2 m resolution may merge narrow streets and tree-covered roads; mitigated by multi-date
+  composites and by reporting APLS by road class.
+- Weak labels are misaligned with imagery by a few metres; mitigated by buffered road labels and a boundary-tolerant loss.
+- Metaheuristics on graphs with 10^4+ nodes may be slow or fail to find a path; mitigated by heuristic initial
+  populations and bounded search regions, and reported honestly as failures.
+
+## 7. Engineering practice
+
+Code follows SOLID (Martin), keeps clear of the smells catalogued by Fowler, and is reviewed twice before each
+commit (author pass, then a review pass with tests and linters: ruff, mypy, pytest; ESLint and Vitest for the
+web). ML-specific practice follows Sculley et al. (2015) and Breck et al. (2017): data and model versions
+recorded, tests for data, model and infrastructure.
+
+## References
+
+**Software engineering**
+- Bass, L.; Clements, P.; Kazman, R. *Software Architecture in Practice*. 4th ed. Addison-Wesley, 2021.
+- Buschmann, F. et al. *Pattern-Oriented Software Architecture, Vol. 1: A System of Patterns*. Wiley, 1996.
+- Gamma, E.; Helm, R.; Johnson, R.; Vlissides, J. *Design Patterns*. Addison-Wesley, 1994.
+- Martin, R. C. *Clean Architecture*. Prentice Hall, 2017. · *Clean Code*. Prentice Hall, 2008.
+- Fowler, M. *Refactoring*. 2nd ed. Addison-Wesley, 2018.
+- McConnell, S. *Code Complete*. 2nd ed. Microsoft Press, 2004.
+- Starke, G.; Hruschka, P. *arc42* template, arc42.org. · Brown, S. *The C4 model for visualising software architecture*, c4model.com.
+- ISO/IEC 25010:2023. *Systems and software Quality Requirements and Evaluation (SQuaRE): Product quality model*.
+- Sculley, D. et al. Hidden technical debt in machine learning systems. *NeurIPS*, 2015.
+- Breck, E. et al. The ML Test Score: a rubric for ML production readiness. *IEEE Big Data*, 2017.
+
+**Path finding and optimisation**
+- Dijkstra, E. W. A note on two problems in connexion with graphs. *Numerische Mathematik* 1, 1959.
+- Hart, P. E.; Nilsson, N. J.; Raphael, B. A formal basis for the heuristic determination of minimum cost paths.
+  *IEEE Trans. Systems Science and Cybernetics* 4(2), 1968.
+- Goldberg, A. V.; Harrelson, C. Computing the shortest path: A* search meets graph theory. *SODA*, 2005.
+- Geisberger, R. et al. Contraction hierarchies: faster and simpler hierarchical routing in road networks. *WEA*, 2008.
+- Dorigo, M.; Maniezzo, V.; Colorni, A. Ant system: optimization by a colony of cooperating agents.
+  *IEEE Trans. Systems, Man, and Cybernetics B* 26(1), 1996.
+- Deb, K. et al. A fast and elitist multiobjective genetic algorithm: NSGA-II. *IEEE Trans. Evolutionary Computation* 6(2), 2002.
+- Boeing, G. OSMnx: new methods for acquiring, constructing, analyzing, and visualizing complex street networks.
+  *Computers, Environment and Urban Systems* 65, 2017.
+
+**Road and building extraction**
+- Ronneberger, O.; Fischer, P.; Brox, T. U-Net. *MICCAI*, 2015.
+- Chen, L.-C. et al. Encoder-decoder with atrous separable convolution (DeepLabv3+). *ECCV*, 2018.
+- Xie, E. et al. SegFormer. *NeurIPS*, 2021.
+- Van Etten, A.; Lindenbaum, D.; Bacastow, T. SpaceNet: a remote sensing dataset and challenge series. arXiv:1807.01232, 2018 (APLS metric).
+- Demir, I. et al. DeepGlobe 2018: a challenge to parse the Earth through satellite images. *CVPR Workshops*, 2018.
+- Máttyus, G.; Luo, W.; Urtasun, R. DeepRoadMapper. *ICCV*, 2017.
+- Batra, A. et al. Improved road connectivity by joint learning of orientation and segmentation. *CVPR*, 2019.
