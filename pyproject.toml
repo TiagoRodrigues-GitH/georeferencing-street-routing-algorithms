@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "street-routing"
+version = "0.1.0"
+description = "Streets of a Brazilian city from public data (IBGE, INPE CBERS-4A) to a road graph, and a comparison of path-finding algorithms"
+authors = [{ name = "Tiago Rodrigues" }]
+requires-python = ">=3.11"
+dependencies = ["geopandas>=1.0", "pyogrio", "shapely>=2.0", "pyproj", "networkx>=3.2", "numpy", "scipy",
+                "scikit-image>=0.22", "rasterio>=1.3"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

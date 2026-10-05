@@ -8,7 +8,7 @@ algorithms on it, with an interactive map that animates each algorithm between a
 |---|---|
 | **Author** | Tiago Rodrigues · Universidade Tecnológica Federal do Paraná (UTFPR) |
 | **Started** | 2026-10-04 |
-| **Status** | Design: architecture, neural network and hyperparameters documented; no code yet |
+| **Status** | Milestone 1 in progress: Londrina street graph built from IBGE block faces (2,000 km, 10,640 intersections); routing demo in the portfolio |
 | **Context** | AI Residency project (Georeferencing) |
 | **Stack (planned)** | Python 3.12 · rasterio · GeoPandas · NetworkX · PyTorch · DEAP/pymoo · Optuna · TypeScript + MapLibre |
 
@@ -47,6 +47,25 @@ with its expected effect: [docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md), [con
 2. **Imagery and segmentation**: CBERS-4A tiles of Londrina, labels, segmentation models and hyperparameter search (GPU).
 3. **Extracted graph**: graph from the road mask, APLS against the IBGE network, routing on the extracted graph.
 4. **Write-up**: results, paper draft, dataset release (CBERS-4A tiles + IBGE labels for Londrina).
+
+## How to run (milestone 1)
+
+```bash
+python -m venv .venv && .venv/Scripts/python -m pip install -e .[dev]     # Windows; .venv/bin on Linux
+python -m pytest                                                            # synthetic skeletons and crossroads
+python -m street_routing.export.web --uf PR --municipality 4113700 --out outputs/web_assets
+```
+
+The export downloads the IBGE files once (`data/raw/ibge`), builds the street graph and writes the files of the
+web map: `places.json` (search index of every state, municipality and Londrina neighbourhood), `states.geojson`,
+`municipalities/<state>.geojson`, `bairros/4113700.geojson` and `graph/4113700.json`.
+
+**How the graph is built.** IBGE publishes block faces, not street centre lines, and the faces stop at the block
+corners. Each face is buffered by 8 m and rasterised at 2 m; the holes left at crossings are filled; the corridor is
+thinned to a skeleton and the skeleton becomes a graph (spurs pruned, junctions split by the thinning merged, edges
+named after the nearest face). Roads with no facing blocks (avenues along lakes and parks, bridges) leave districts
+cut off: parts closer than 100 m are joined by straight estimated links, marked as such. Londrina: 2,047 km of
+corridor centre line, 1,996 km in the routable network (97.5%), 17 estimated links totalling 0.56 km.
 
 ## Data (Brazilian public sources only)
 

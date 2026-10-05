@@ -89,8 +89,11 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 
 ## 4. Runtime view: one benchmark run
 
-1. `ibge_graph` builds or loads the street network of Londrina from the IBGE lines (noded at intersections, edge
-   lengths in metres; the IBGE data have no speeds or one-way streets, so routes minimise distance).
+1. `graph.ibge_graph` builds the street network of Londrina from the IBGE block faces: faces buffered by 8 m and
+   rasterised at 2 m form the street corridors, the corridors are thinned to centre lines (`skimage` skeleton,
+   Zhang and Suen 1984) and `graph.skeleton` turns the skeleton into a graph; short spurs are pruned, degree-2
+   nodes merged, each edge named after the nearest face, and the largest component kept (edge lengths in metres;
+   the IBGE data have no speeds or one-way streets, so routes minimise distance).
 2. `benchmark` samples N origin-destination pairs (stratified by straight-line distance) with a fixed seed.
 3. For each pair and each `PathFinder`: run, record metrics and the trace; metaheuristics run several seeds.
 4. Results go to a tidy table; statistics (Friedman + Nemenyi or Wilcoxon-Holm) and plots are produced.
@@ -105,6 +108,8 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 | 3 | Brazilian public data only (INPE images, IBGE vectors); buildings from a hand-annotated sample | One citable dataset family for the article; no OpenStreetMap or commercial sources (author's decision, 2026-10-04) |
 | 4 | Algorithms run in the browser on a static graph | No server to maintain; same code path for every algorithm's animation |
 | 5 | SIRGAS 2000 / UTM 22S (EPSG:31982) for all metric work | Official Brazilian datum; metres for lengths and APLS |
+| 6 | IBGE graph from a rasterised street corridor and its skeleton, not by noding the face lines (2026-10-05) | IBGE publishes block faces (two parallel lines per street, cut at the corners), not centre lines, so noding gives two disconnected networks; the raster skeleton recovers one centre line and reuses the code that vectorises the CBERS-4A road masks in milestone 3, so APLS compares images, not vectorisers |
+| 7 | Web page in the author's portfolio (Angular), MapLibre GL CSP build, every layer a static GeoJSON of the site | No tile or API server, the site's strict Content-Security-Policy stays unchanged, and the page works without third-party services |
 
 ## 6. Risks
 
