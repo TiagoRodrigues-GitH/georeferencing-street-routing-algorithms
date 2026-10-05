@@ -110,6 +110,7 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 | 5 | SIRGAS 2000 / UTM 22S (EPSG:31982) for all metric work | Official Brazilian datum; metres for lengths and APLS |
 | 6 | IBGE graph from a rasterised street corridor and its skeleton, not by noding the face lines (2026-10-05) | IBGE publishes block faces (two parallel lines per street, cut at the corners), not centre lines, so noding gives two disconnected networks; the raster skeleton recovers one centre line and reuses the code that vectorises the CBERS-4A road masks in milestone 3, so APLS compares images, not vectorisers |
 | 7 | Web page in the author's portfolio (Angular), MapLibre GL CSP build, every layer a static GeoJSON of the site | No tile or API server, the site's strict Content-Security-Policy stays unchanged, and the page works without third-party services |
+| 8 | Estimated links where the road distance between junctions under 100 m apart is over 10x their gap, only if the link crosses no block face and no street (2026-10-05) | The inner sides of an avenue's carriageways face no block, so the openings of wide central medians are missing: 13.9% of Londrina's node pairs 150-600 m apart needed a detour over 5x (worst 261x). With them (143 estimated links in all, 7.75 km, 0.4% of the network) it is 3.8% (worst 38x); the guards keep links out of blocks and off real road crossings. Links are dashed on the map |
 
 ## 6. Risks
 
@@ -119,8 +120,11 @@ nodes over many origin-destination pairs, with paired tests across seeds.
   buffered road labels, a boundary-tolerant loss, and an urban-only area of interest.
 - No building vectors in the chosen sources: the building class depends on a hand-annotated sample, kept small and
   stratified by neighbourhood type.
-- Metaheuristics on graphs with 10^4+ nodes may be slow or fail to find a path; mitigated by heuristic initial
-  populations and bounded search regions, and reported honestly as failures.
+- Metaheuristics on graphs with 10^4+ nodes may be slow or fail to find a path; their random walks are
+  self-avoiding with backtracking (the ants' memory of ACO, Dorigo & Stutzle 2004), a randomised depth-first search
+  that always reaches the target of a connected graph, and they start from goal-biased walks.
+- Estimated links (ADR 8) may join two sides of a real barrier narrower than 100 m with no block faces (a narrow
+  valley park); they are drawn dashed and counted, and routes that use them can be told apart.
 
 ## 7. Engineering practice
 

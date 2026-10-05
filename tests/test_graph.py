@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from shapely.geometry import LineString
 
-from street_routing.graph.ibge_graph import UTM_22S, CorridorParams, bridge_components, build_graph
+from street_routing.graph.ibge_graph import UTM_22S, CorridorParams, bridge_components, bridge_detours, build_graph
 from skimage.morphology import skeletonize
 
 from street_routing.graph.skeleton import skeleton_to_graph
@@ -70,3 +70,19 @@ def test_faces_become_one_connected_crossroad_with_centre_lines():
     total = sum(d["length"] for *_, d in g.edges(data=True))
     assert 650 < total < 820                    # ~2 x 400 m of centre line, not 4 x 400 m of faces
     assert {d["name"] for *_, d in g.edges(data=True)} == {"Rua A"}
+
+
+def test_carriageways_meeting_far_away_are_joined_but_never_through_a_block():
+    """Two parallel carriageways 40 m apart that only meet 2 km away: joined at both ends, but not in the middle,
+    where a block face lies between them."""
+    g = nx.MultiGraph()
+    for n, (x, y) in enumerate([(0, 0), (500, 0), (1000, 0), (0, 40), (500, 40), (1000, 40)]):
+        g.add_node(n, x=float(x), y=float(y))
+    for u, v in [(0, 1), (1, 2), (3, 4), (4, 5)]:
+        g.add_edge(u, v, length=500.0, geometry=LineString([(g.nodes[u]["x"], g.nodes[u]["y"]),
+                                                           (g.nodes[v]["x"], g.nodes[v]["y"])]))
+    g.add_edge(2, 5, length=3000.0, geometry=LineString([(1000, 0), (2500, 0), (2500, 40), (1000, 40)]))
+    block_face = LineString([(400, 20), (600, 20)])
+    added = bridge_detours(g, [block_face], max_gap_m=70.0, max_detour=10.0)
+    links = {frozenset((u, v)) for u, v, d in g.edges(data=True) if d.get("bridged")}
+    assert added == 2 and links == {frozenset((0, 3)), frozenset((2, 5))}

@@ -64,8 +64,11 @@ web map: `places.json` (search index of every state, municipality and Londrina n
 corners. Each face is buffered by 8 m and rasterised at 2 m; the holes left at crossings are filled; the corridor is
 thinned to a skeleton and the skeleton becomes a graph (spurs pruned, junctions split by the thinning merged, edges
 named after the nearest face). Roads with no facing blocks (avenues along lakes and parks, bridges) leave districts
-cut off: parts closer than 100 m are joined by straight estimated links, marked as such. Londrina: 2,047 km of
-corridor centre line, 1,996 km in the routable network (97.5%), 17 estimated links totalling 0.56 km.
+cut off: parts closer than 100 m are joined by straight estimated links, marked as such. The inner sides of an
+avenue's carriageways face no block either, so the openings of wide medians are missing: junctions under 100 m apart
+whose road distance is over 10x their gap are joined too, when the link crosses no block face and no street (pairs
+150-600 m apart needing a detour over 5x: 13.9% -> 3.8%). Londrina: 10,640 junctions, 2,003 km in the routable
+network, 143 estimated links totalling 7.75 km (0.4%).
 
 ## Data (Brazilian public sources only)
 

@@ -13,8 +13,12 @@ parallel networks. The street space between facing blocks is recovered instead:
    edge geometry is simplified and every edge gets the name of the nearest face;
 5. parts of the network cut off by roads that have no facing blocks (avenues along parks and lakes, bridges,
    highways) are joined to the rest by straight links across gaps up to ``max_gap_m``, marked ``bridged``
-   (Londrina: 17 links, 0.56 km, raise the connected share from 70% to 97.6% of the street length), and the
-   largest connected component is kept (routing needs one network).
+   (Londrina: 17 links, 0.56 km, raise the connected share from 70% to 97.6% of the street length);
+6. junctions closer than ``detour_gap_m`` whose road distance is over ``max_detour`` times their gap are joined
+   the same way, when the link crosses no block face and no street: the inner sides of an avenue's carriageways
+   face no block, so the openings of a wide central median are missing and the two carriageways only meet far
+   away (Londrina: node pairs 150-600 m apart with a detour over 5x drop from 13.9% to 3.8%); the largest
+   connected component is kept (routing needs one network).
 
 All lengths are metres in SIRGAS 2000 / UTM zone 22S (EPSG:31982); the IBGE data have no speeds or one-way
 streets, so routes minimise distance.
@@ -22,6 +26,7 @@ streets, so routes minimise distance.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import geopandas as gpd
@@ -31,6 +36,7 @@ from rasterio import features
 from rasterio.transform import from_origin
 from scipy import ndimage
 from shapely.geometry import LineString
+from shapely.geometry.base import BaseGeometry
 from skimage.morphology import remove_small_holes, skeletonize
 
 from street_routing.graph.skeleton import skeleton_to_graph
@@ -45,6 +51,8 @@ class CorridorParams:
     close_iterations: int = 1     # binary closing (3x3) to join faces broken at corners
     min_spur_m: float = 20.0
     max_gap_m: float = 100.0      # parts of the network closer than this are joined by an estimated link
+    detour_gap_m: float = 100.0   # junctions closer than this (carriageways of a wide median: 80-90 m) ...
+    max_detour: float = 10.0      # ... with a road distance over this many times their gap get an estimated link
     simplify_m: float = 2.0
 
 
@@ -156,6 +164,36 @@ def bridge_components(g: nx.MultiGraph, max_gap_m: float) -> int:
             return added
 
 
+def bridge_detours(g: nx.MultiGraph, barriers: Iterable[BaseGeometry], max_gap_m: float, max_detour: float) -> int:
+    """Join two nodes at most ``max_gap_m`` apart whose road distance is over ``max_detour`` x their gap (at least
+    10 m), nearest pairs first, by a straight link marked ``bridged=True``, unless the link crosses one of the
+    ``barriers`` (block faces: it would go through a block) or a street (streets meet at junctions). The road
+    distance is re-measured after every link, so one link per gap is enough. Returns the number of links added."""
+    from scipy.spatial import cKDTree
+    from shapely import STRtree
+
+    nodes = list(g.nodes)
+    xy = np.array([(g.nodes[n]["x"], g.nodes[n]["y"]) for n in nodes])
+    pairs = sorted((float(np.hypot(*(xy[i] - xy[j]))), nodes[i], nodes[j])
+                   for i, j in cKDTree(xy).query_pairs(max_gap_m))
+    barrier_tree = STRtree(list(barriers))
+    street_tree = STRtree([d["geometry"] for *_, d in g.edges(data=True)])
+    links: list[LineString] = []
+    for gap, u, v in pairs:
+        try:
+            nx.single_source_dijkstra(g, u, target=v, cutoff=max_detour * max(gap, 10.0), weight="length")
+            continue  # a short enough road already exists
+        except nx.NetworkXNoPath:
+            pass
+        link = LineString([(g.nodes[u]["x"], g.nodes[u]["y"]), (g.nodes[v]["x"], g.nodes[v]["y"])])
+        if (len(barrier_tree.query(link, predicate="intersects")) or len(street_tree.query(link, predicate="crosses"))
+                or any(link.crosses(other) for other in links)):
+            continue
+        g.add_edge(u, v, length=gap, geometry=link, bridged=True)
+        links.append(link)
+    return len(links)
+
+
 def _oriented(line: LineString, start_xy: tuple[float, float]) -> list[tuple[float, float]]:
     """Coordinates of ``line`` starting at the end closer to ``start_xy``."""
     coords = list(line.coords)
@@ -200,6 +238,7 @@ def build_graph(faces: gpd.GeoDataFrame, p: CorridorParams = CorridorParams()) -
     g = collapse_junction_links(g, 1.5 * p.half_width_m)
     bridge_components(g, p.max_gap_m)
     merge_degree_two(g)
+    bridge_detours(g, faces.geometry.to_numpy(), p.detour_gap_m, p.max_detour)
     largest = max(nx.connected_components(g), key=len)
     g = g.subgraph(largest).copy()
     names = faces.apply(street_name, axis=1).to_numpy()
