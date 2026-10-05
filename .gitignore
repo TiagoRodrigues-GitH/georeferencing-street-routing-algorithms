@@ -1,0 +1,13 @@
+# data and outputs stay local (CBERS-4A scenes are large)
+data/
+outputs/
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# web
+node_modules/
+dist/

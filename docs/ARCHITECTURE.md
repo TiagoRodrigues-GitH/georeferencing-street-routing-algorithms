@@ -21,10 +21,8 @@ flowchart LR
   user([Researcher / visitor]) --> web[Web map]
   web --> artefacts[(Graph JSON, routes, metrics)]
   pipeline[Python pipeline] --> artefacts
-  pipeline --> inpe[(INPE STAC: CBERS-4A)]
-  pipeline --> osm[(OpenStreetMap)]
-  pipeline --> gob[(Google Open Buildings)]
-  pipeline --> ibge[(IBGE boundary)]
+  pipeline --> inpe[(INPE STAC: CBERS-4A images)]
+  pipeline --> ibge[(IBGE: street lines, boundary)]
 ```
 
 The pipeline runs offline and publishes static artefacts; the web map is a static site (GitHub Pages) that runs
@@ -47,8 +45,8 @@ flowchart TD
     D --> E[vectorise: skeleton -> graph; masks -> polygons]
   end
   subgraph post [Post-processing]
-    E --> F[graph: clean, compare with OSM - APLS]
-    A --> G[osm_graph: OSMnx road network]
+    E --> F[graph: clean, compare with IBGE - APLS]
+    A --> G[ibge_graph: street network from IBGE lines]
     F --> H[routing: PathFinder strategies]
     G --> H
     H --> I[benchmark: metrics + statistics]
@@ -59,12 +57,12 @@ flowchart TD
 
 | Package | Responsibility | Key abstraction |
 |---|---|---|
-| `sources` | Download and cache each dataset; record version and licence | `DataSource` interface (one class per source) |
+| `sources` | Download and cache CBERS-4A scenes (INPE STAC) and IBGE vectors; record version and licence | `DataSource` interface (one class per source) |
 | `raster` | Reprojection to EPSG:31982, tiling, normalisation, cloud masking | pure functions over `rasterio` datasets |
 | `labels` | Rasterise vector roads/buildings into masks aligned with the tiles | pure functions |
 | `segmentation` | Models, training loop, inference; model choice by config | `SegmentationModel` (registry, Factory) |
 | `vectorise` | Road mask -> skeleton -> graph; building mask -> polygons | pure functions |
-| `graph` | Graph cleaning, simplification, APLS against a reference graph | `RoadGraph` wrapper over NetworkX |
+| `graph` | Build the IBGE graph (noding street lines), clean and simplify, APLS against a reference graph | `RoadGraph` wrapper over NetworkX |
 | `routing` | Path-finding algorithms with a common interface and exploration traces | `PathFinder` (Strategy) |
 | `benchmark` | Origin-destination sampling, metrics, paired statistical tests | `Experiment` |
 | `export` | Graph, routes and traces to compact JSON for the web | pure functions |
@@ -91,7 +89,8 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 
 ## 4. Runtime view: one benchmark run
 
-1. `osm_graph` builds or loads the drivable network of Londrina (OSMnx), simplified, with edge lengths and speeds.
+1. `ibge_graph` builds or loads the street network of Londrina from the IBGE lines (noded at intersections, edge
+   lengths in metres; the IBGE data have no speeds or one-way streets, so routes minimise distance).
 2. `benchmark` samples N origin-destination pairs (stratified by straight-line distance) with a fixed seed.
 3. For each pair and each `PathFinder`: run, record metrics and the trace; metaheuristics run several seeds.
 4. Results go to a tidy table; statistics (Friedman + Nemenyi or Wilcoxon-Holm) and plots are produced.
@@ -101,9 +100,9 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 
 | # | Decision | Reason |
 |---|---|---|
-| 1 | Start with the OpenStreetMap graph (milestone 1) before images | Delivers the routing study and demo early; gives the reference graph for APLS later |
+| 1 | Start with the IBGE street graph (milestone 1) before images | Delivers the routing study and demo early; gives the reference graph for APLS later |
 | 2 | CBERS-4A 2 m as the image source | Free (CC BY 4.0), Brazilian, fine enough for urban streets; Sentinel-2 at 10 m is too coarse |
-| 3 | Weak labels from OSM + Google Open Buildings, checked on a hand-labelled sample | No manual annotation of the whole city |
+| 3 | Brazilian public data only (INPE images, IBGE vectors); buildings from a hand-annotated sample | One citable dataset family for the article; no OpenStreetMap or commercial sources (author's decision, 2026-10-04) |
 | 4 | Algorithms run in the browser on a static graph | No server to maintain; same code path for every algorithm's animation |
 | 5 | SIRGAS 2000 / UTM 22S (EPSG:31982) for all metric work | Official Brazilian datum; metres for lengths and APLS |
 
@@ -111,7 +110,10 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 
 - CBERS-4A cloud cover and 2 m resolution may merge narrow streets and tree-covered roads; mitigated by multi-date
   composites and by reporting APLS by road class.
-- Weak labels are misaligned with imagery by a few metres; mitigated by buffered road labels and a boundary-tolerant loss.
+- IBGE street lines are misaligned with the imagery by a few metres and cover urban areas only; mitigated by
+  buffered road labels, a boundary-tolerant loss, and an urban-only area of interest.
+- No building vectors in the chosen sources: the building class depends on a hand-annotated sample, kept small and
+  stratified by neighbourhood type.
 - Metaheuristics on graphs with 10^4+ nodes may be slow or fail to find a path; mitigated by heuristic initial
   populations and bounded search regions, and reported honestly as failures.
 
@@ -145,8 +147,10 @@ recorded, tests for data, model and infrastructure.
 - Dorigo, M.; Maniezzo, V.; Colorni, A. Ant system: optimization by a colony of cooperating agents.
   *IEEE Trans. Systems, Man, and Cybernetics B* 26(1), 1996.
 - Deb, K. et al. A fast and elitist multiobjective genetic algorithm: NSGA-II. *IEEE Trans. Evolutionary Computation* 6(2), 2002.
-- Boeing, G. OSMnx: new methods for acquiring, constructing, analyzing, and visualizing complex street networks.
-  *Computers, Environment and Urban Systems* 65, 2017.
+
+**Data**
+- IBGE. *Base de Faces de Logradouros do Brasil*, Censo Demográfico 2022. Rio de Janeiro: IBGE, 2024.
+- INPE. CBERS-4A WPM products (STAC catalogue, data.inpe.br), CC BY 4.0.
 
 **Road and building extraction**
 - Ronneberger, O.; Fischer, P.; Brox, T. U-Net. *MICCAI*, 2015.

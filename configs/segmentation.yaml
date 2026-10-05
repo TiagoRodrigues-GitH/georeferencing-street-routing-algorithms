@@ -1,0 +1,55 @@
+# Street and building segmentation. Every value is explained, with its range and effect, in docs/NEURAL_NETWORK.md.
+data:
+  area: londrina                 # IBGE municipality code 4113700
+  bands: rgb                     # rgb | rgb_nir
+  tile_size: 512                 # pixels (2 m each: 1 km per side)
+  road_buffer_m: 4               # label width around each IBGE street line
+  split: {train: 0.7, val: 0.15, test: 0.15, by: spatial_blocks}   # spatially disjoint blocks, not random tiles
+
+model:
+  architecture: unet             # unet | deeplabv3plus | segformer
+  encoder: resnet34              # resnet18 | resnet34 | resnet50 | efficientnet-b0 | mit_b0 | mit_b2
+  pretrained: imagenet           # imagenet | none
+  classes: [background, road, building]
+
+train:
+  epochs: 40
+  early_stopping_patience: 8
+  batch_size: 8
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-4
+  optimizer: adamw
+  scheduler: cosine              # cosine | onecycle | plateau
+  amp: true                      # mixed precision: fits the 6 GB GPU
+  seeds: [1, 2, 3]
+
+loss:
+  ce_weight: 1.0
+  dice_weight: 1.0
+  cldice_weight: 0.0             # 0 disables the connectivity-preserving term
+  class_weights: [1.0, 3.0, 2.0] # background, road, building
+
+augment:
+  flips_rot90: true
+  color_jitter: 0.2
+  scale_jitter: 0.1
+
+inference:
+  road_threshold: 0.5
+  test_time_augmentation: false
+
+vectorise:
+  min_branch_m: 20
+  junction_merge_m: 6
+  simplify_tolerance_m: 2
+
+hpo:                             # optional search over the values above (Optuna)
+  enabled: false
+  sampler: tpe                   # tpe (Bayesian) | cmaes (evolutionary) | random
+  n_trials: 30
+  objective: val_apls            # val_apls | val_road_iou
+  space:
+    learning_rate: [1.0e-5, 1.0e-3, log]
+    weight_decay: [0.0, 1.0e-2]
+    cldice_weight: [0.0, 1.0]
+    road_buffer_m: [2, 8]

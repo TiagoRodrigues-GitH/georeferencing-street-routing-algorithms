@@ -1,0 +1,42 @@
+# Path-finding algorithms and the benchmark. The web map exposes the same values as sliders.
+graph:
+  source: ibge_faces_logradouros_2022   # ibge_faces_logradouros_2022 | extracted (from the segmentation)
+  weight: length_m                      # IBGE lines carry no speed or one-way data: distance only
+  crs: EPSG:31982                       # SIRGAS 2000 / UTM zone 22S
+
+algorithms:
+  dijkstra: {}
+  astar:
+    heuristic: euclidean                # admissible on a projected CRS
+    weight: 1.0                         # >1 = weighted A*: faster, path at most `weight` times longer
+  bidirectional_dijkstra: {}
+  contraction_hierarchies: {}
+  ant_colony:                           # Dorigo et al. 1996
+    ants: 20                            # more ants explore more, cost more time
+    iterations: 50
+    alpha: 1.0                          # weight of pheromone (learned experience)
+    beta: 2.0                           # weight of the distance heuristic (greediness)
+    evaporation: 0.1                    # higher forgets old trails faster, avoids early lock-in
+    deposit_q: 1.0
+  genetic_algorithm:                    # variable-length path chromosomes
+    population: 60
+    generations: 100
+    crossover_rate: 0.8                 # common-node crossover between two paths
+    mutation_rate: 0.1                  # re-route a random sub-path
+    tournament_size: 3                  # larger = stronger selection pressure, less diversity
+    elitism: 2
+  simulated_annealing:
+    initial_temperature: 1000.0
+    cooling: 0.995                      # closer to 1 = slower cooling, better paths, more time
+    iterations: 5000
+  nsga2:                                # Deb et al. 2002
+    population: 60
+    generations: 80
+    objectives: [length_m, turns, main_road_share]
+
+benchmark:
+  pairs: 200                            # origin-destination pairs
+  distance_strata_m: [500, 2000, 5000, 15000]
+  seeds: [1, 2, 3, 4, 5]                # metaheuristics are stochastic: repeat and report spread
+  metrics: [optimality_gap, success_rate, runtime_s, expanded_nodes]
+  tests: friedman_nemenyi              # across algorithms, paired by origin-destination pair
