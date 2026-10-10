@@ -8,7 +8,7 @@ algorithms on it, with an interactive map that animates each algorithm between a
 |---|---|
 | **Author** | Tiago Rodrigues · Universidade Tecnológica Federal do Paraná (UTFPR) |
 | **Started** | 2026-10-04 |
-| **Status** | Milestone 1 in progress: Londrina street graph built from IBGE block faces (2,000 km, 10,640 intersections); routing demo in the portfolio |
+| **Status** | Milestone 1 in progress: street graphs built from IBGE block faces for six areas (Londrina, Curitiba, Florianópolis, Brasília, São Paulo, ABC Paulista; 39,000 km of streets); routing demo in the portfolio |
 | **Context** | AI Residency project (Georeferencing) |
 | **Stack (planned)** | Python 3.12 · rasterio · GeoPandas · NetworkX · PyTorch · DEAP/pymoo · Optuna · TypeScript + MapLibre |
 
@@ -53,12 +53,28 @@ with its expected effect: [docs/NEURAL_NETWORK.md](docs/NEURAL_NETWORK.md), [con
 ```bash
 python -m venv .venv && .venv/Scripts/python -m pip install -e .[dev]     # Windows; .venv/bin on Linux
 python -m pytest                                                            # synthetic skeletons and crossroads
-python -m street_routing.export.web --uf PR --municipality 4113700 --out outputs/web_assets
+python -m street_routing.export.web --out outputs/web_assets                 # all six areas (~10 min)
+python -m street_routing.export.web --area 3550308 --out outputs/web_assets  # one area; the others are kept
 ```
 
-The export downloads the IBGE files once (`data/raw/ibge`), builds the street graph and writes the files of the
-web map: `places.json` (search index of every state, municipality and Londrina neighbourhood), `states.geojson`,
-`municipalities/<state>.geojson`, `bairros/4113700.geojson` and `graph/4113700.json`.
+The export downloads the IBGE files once (`data/raw/ibge`), builds the street graph of each routed area
+([export/areas.py](src/street_routing/export/areas.py)) and writes the files of the web map: `places.json` (search
+index of every state, municipality and neighbourhood of the routed areas, and the list of routed areas),
+`states.geojson`, `municipalities/<state>.geojson`, `bairros/<area>.geojson` (where IBGE publishes neighbourhoods)
+and `graph/<area>.json`.
+
+| Area | Intersections | Streets | Parts | File |
+|---|---|---|---|---|
+| Londrina (PR) | 10,640 | 2,003 km | 1 | 1.8 MB |
+| Curitiba (PR) | 27,242 | 4,655 km | 1 | 5.0 MB |
+| Florianópolis (SC) | 9,405 | 1,535 km | 5 | 1.5 MB |
+| Brasília (DF) | 57,674 | 9,265 km | 75 | 10.5 MB |
+| São Paulo (SP) | 112,928 | 16,201 km | 1 | 20.1 MB |
+| ABC Paulista (7 municipalities, SP) | 30,828 | 5,012 km | 1 | 5.5 MB |
+
+Large cities are rasterised in 8 km tiles with a 400 m overlap (the skeleton of each core is exact), each area is
+projected in its own UTM zone, and every connected part with at least 20 km of streets is kept: in Florianópolis and
+Brasília, bridges and highways have no block faces, so the network stays in parts and no link is invented.
 
 **How the graph is built.** IBGE publishes block faces, not street centre lines, and the faces stop at the block
 corners. Each face is buffered by 8 m and rasterised at 2 m; the holes left at crossings are filled; the corridor is

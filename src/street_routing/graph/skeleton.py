@@ -8,6 +8,10 @@ Pixels are 8-connected. A pixel with exactly two skeleton neighbours lies inside
 (end: one neighbour; junction: three or more) is a node pixel. Touching node pixels form one node (a junction
 drawn as a small blob of pixels is one intersection). Every chain of segment pixels between two node pixels
 becomes an edge; a closed loop without any node pixel gets one node so that it is not lost.
+
+The skeleton is handled as a sorted set of pixel keys (``row * width + col``), not as an image: a large city at
+2 m is a raster of ~10^9 pixels of which ~1% belong to the skeleton, so the tiled pipeline (``ibge_graph``) never
+holds the full image. ``skeleton_to_graph`` (an image) and ``sparse_skeleton_to_graph`` (keys) give the same graph.
 """
 
 from __future__ import annotations
@@ -15,9 +19,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import ndimage
+from scipy import sparse
+from scipy.sparse.csgraph import connected_components
 
-_EIGHT = np.ones((3, 3), dtype=bool)
 _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
 
@@ -29,64 +33,96 @@ class PixelGraph:
     edges: list[tuple[int, int, np.ndarray]]   # path (K, 2) int
 
 
-def neighbour_count(skeleton: np.ndarray) -> np.ndarray:
-    kernel = np.ones((3, 3), dtype=np.uint8)
-    kernel[1, 1] = 0
-    sk = skeleton.astype(np.uint8)
-    return ndimage.convolve(sk, kernel, mode="constant") * sk
+def neighbour_table(keys: np.ndarray, width: int) -> np.ndarray:
+    """(N, 8) index of each pixel's 8 neighbours in ``keys`` (sorted, unique), -1 where there is none; neighbours
+    in the order of ``_NEIGHBOURS``."""
+    rows, cols = np.divmod(keys, width)
+    table = np.full((len(keys), 8), -1, dtype=np.int64)
+    for j, (dr, dc) in enumerate(_NEIGHBOURS):
+        ok = (cols + dc >= 0) & (cols + dc < width) & (rows + dr >= 0)
+        target = keys + dr * width + dc
+        pos = np.searchsorted(keys, target)
+        pos[pos >= len(keys)] = 0
+        hit = ok & (keys[pos] == target)
+        table[hit, j] = pos[hit]
+    return table
 
 
-def _node_pixels(sk: np.ndarray) -> np.ndarray:
-    """Pixels that are not inside a segment, plus one pixel per closed loop."""
-    node_px = sk & (neighbour_count(sk) != 2)
-    components, n = ndimage.label(sk, structure=_EIGHT)
-    has_node = np.zeros(n + 1, dtype=bool)
-    has_node[np.unique(components[node_px])] = True
-    for comp in np.flatnonzero(~has_node[1:]) + 1:
-        r, c = np.argwhere(components == comp)[0]
-        node_px[r, c] = True
-    return node_px
+def _components(table: np.ndarray, members: np.ndarray) -> np.ndarray:
+    """Connected-component label of every pixel among ``members`` (a boolean mask); -1 for the others. Labels are
+    numbered in order of each component's first pixel, like ``scipy.ndimage.label`` in raster order."""
+    n = len(table)
+    src = np.repeat(np.arange(n), 8)
+    dst = table.ravel()
+    keep = (dst >= 0) & members[src] & members[np.maximum(dst, 0)]
+    adjacency = sparse.coo_matrix((np.ones(keep.sum(), bool), (src[keep], dst[keep])), shape=(n, n)).tocsr()
+    _, raw = connected_components(adjacency, directed=False)
+    labels = np.full(n, -1, dtype=np.int64)
+    idx = np.flatnonzero(members)
+    if len(idx):
+        raw_m = raw[idx]
+        unique, first = np.unique(raw_m, return_index=True)     # first pixel (lowest key) of each component
+        rank = np.empty(len(unique), dtype=np.int64)
+        rank[np.argsort(first)] = np.arange(len(unique))
+        labels[idx] = rank[np.searchsorted(unique, raw_m)]
+    return labels
 
 
-def skeleton_to_graph(skeleton: np.ndarray) -> PixelGraph:
-    sk = np.asarray(skeleton, dtype=bool)
-    node_px = _node_pixels(sk)
-    labels, n_nodes = ndimage.label(node_px, structure=_EIGHT)
-    centroids = np.array(ndimage.center_of_mass(node_px, labels, range(1, n_nodes + 1)), dtype=float).reshape(-1, 2)
-    h, w = sk.shape
+def sparse_skeleton_to_graph(keys: np.ndarray, width: int) -> PixelGraph:
+    """Graph of a skeleton given as the sorted, unique keys ``row * width + col`` of its pixels."""
+    keys = np.asarray(keys, dtype=np.int64)
+    if len(keys) == 0:
+        return PixelGraph(np.zeros((0, 2)), [])
+    table = neighbour_table(keys, width)
+    count = (table >= 0).sum(axis=1)
+    node = count != 2
+    everything = _components(table, np.ones(len(keys), bool))
+    has_node = np.zeros(everything.max() + 1, bool)
+    has_node[everything[node]] = True
+    for comp in np.flatnonzero(~has_node):                      # a closed loop: its first pixel becomes a node
+        node[np.flatnonzero(everything == comp)[0]] = True
+    labels = _components(table, node)
+    rows, cols = np.divmod(keys, width)
+    n_nodes = labels.max() + 1
+    weight = np.bincount(labels[node], minlength=n_nodes)
+    centroids = np.column_stack([np.bincount(labels[node], rows[node], n_nodes),
+                                 np.bincount(labels[node], cols[node], n_nodes)]) / weight[:, None]
 
-    def inside(r: int, c: int) -> bool:
-        return 0 <= r < h and 0 <= c < w and bool(sk[r, c])
-
-    visited = np.zeros_like(sk)  # segment pixels already part of an edge
+    visited = [False] * len(keys)        # segment pixels already part of an edge
     edges: list[tuple[int, int, np.ndarray]] = []
-    for r0, c0 in np.argwhere(node_px):
-        start = labels[r0, c0]
-        for dr, dc in _NEIGHBOURS:
-            r, c = r0 + dr, c0 + dc
-            if not inside(r, c) or node_px[r, c] or visited[r, c]:
+    tbl = table.tolist()                 # Python lists: the walk below is a tight loop over single pixels
+    is_node = node.tolist()
+    lab = labels.tolist()
+    for p0 in np.flatnonzero(node).tolist():
+        start = lab[p0]
+        for p in tbl[p0]:
+            if p < 0 or is_node[p] or visited[p]:
                 continue
-            path, prev, cur = [(r0, c0), (r, c)], (r0, c0), (r, c)
-            visited[r, c] = True
+            path, prev, cur = [p0, p], p0, p
+            visited[p] = True
             while True:  # follow the segment until a node pixel
-                nxt = None
-                for er, ec in _NEIGHBOURS:
-                    rr, cc = cur[0] + er, cur[1] + ec
-                    if (rr, cc) == prev or not inside(rr, cc):
+                nxt = -1
+                for q in tbl[cur]:
+                    if q < 0 or q == prev:
                         continue
-                    if node_px[rr, cc]:
-                        if labels[rr, cc] == start and len(path) <= 2:
+                    if is_node[q]:
+                        if lab[q] == start and len(path) <= 2:
                             continue  # still beside the node we started from
-                        nxt = (rr, cc)
+                        nxt = q
                         break
-                    if not visited[rr, cc]:
-                        nxt = (rr, cc)
-                if nxt is None:
+                    if not visited[q]:
+                        nxt = q
+                if nxt < 0:
                     break  # a dead end inside a segment cannot happen in a skeleton; stop defensively
                 path.append(nxt)
-                if node_px[nxt]:
-                    edges.append((start - 1, labels[nxt] - 1, np.array(path)))
+                if is_node[nxt]:
+                    edges.append((start, lab[nxt], np.column_stack([rows[path], cols[path]])))
                     break
                 visited[nxt] = True
                 prev, cur = cur, nxt
     return PixelGraph(centroids, edges)
+
+
+def skeleton_to_graph(skeleton: np.ndarray) -> PixelGraph:
+    sk = np.asarray(skeleton, dtype=bool)
+    return sparse_skeleton_to_graph(np.flatnonzero(sk), sk.shape[1])

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -73,7 +74,14 @@ class IbgeSource:
         return gpd.read_file(shp)
 
     def bairros(self, uf: str, municipality: str) -> gpd.GeoDataFrame:
-        archive = _download(BAIRROS_URL.format(uf=uf), self.cache / f"{uf}_bairros_CD2022.zip")
+        """Neighbourhoods of the municipality; empty where IBGE publishes none (the Federal District has
+        administrative regions, not bairros, and no file)."""
+        try:
+            archive = _download(BAIRROS_URL.format(uf=uf), self.cache / f"{uf}_bairros_CD2022.zip")
+        except urllib.error.HTTPError as err:
+            if err.code != 404:
+                raise
+            return gpd.GeoDataFrame({"CD_BAIRRO": [], "NM_BAIRRO": []}, geometry=[], crs="EPSG:4674")
         shp = self.cache / f"{uf}_bairros_CD2022.shp"
         if not shp.exists():
             zipfile.ZipFile(archive).extractall(self.cache)
