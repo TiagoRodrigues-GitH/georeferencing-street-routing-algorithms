@@ -93,7 +93,8 @@ nodes over many origin-destination pairs, with paired tests across seeds.
    rasterised at 2 m form the street corridors, the corridors are thinned to centre lines (`skimage` skeleton,
    Zhang and Suen 1984) and `graph.skeleton` turns the skeleton into a graph; short spurs are pruned, degree-2
    nodes merged, each edge named after the nearest face, and the largest component kept (edge lengths in metres;
-   the IBGE data have no speeds or one-way streets, so routes minimise distance).
+   the IBGE data have no speeds, so routes minimise distance; one-way streets are added from OpenStreetMap,
+   ADR 13-14).
 2. `benchmark` samples N origin-destination pairs (stratified by straight-line distance) with a fixed seed.
 3. For each pair and each `PathFinder`: run, record metrics and the trace; metaheuristics run several seeds.
 4. Results go to a tidy table; statistics (Friedman + Nemenyi or Wilcoxon-Holm) and plots are produced.
@@ -105,7 +106,7 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 |---|---|---|
 | 1 | Start with the IBGE street graph (milestone 1) before images | Delivers the routing study and demo early; gives the reference graph for APLS later |
 | 2 | CBERS-4A 2 m as the image source | Free (CC BY 4.0), Brazilian, fine enough for urban streets; Sentinel-2 at 10 m is too coarse |
-| 3 | Brazilian public data only (INPE images, IBGE vectors); buildings from a hand-annotated sample | One citable dataset family for the article; no OpenStreetMap or commercial sources (author's decision, 2026-10-04) |
+| 3 | Brazilian public data (INPE images, IBGE vectors) for geometry; buildings from a hand-annotated sample; OpenStreetMap only for the direction of one-way streets (revised 2026-10-10; first version excluded OSM) | One citable dataset family for the article; no Brazilian public source publishes traffic direction, and the author asked for it on the map (2026-10-10) |
 | 4 | Algorithms run in the browser on a static graph | No server to maintain; same code path for every algorithm's animation |
 | 5 | SIRGAS 2000 / UTM in the zone of each city (`utm_crs`: EPSG 31960 + zone; 22S for Londrina, Curitiba and Florianópolis, 23S for São Paulo, ABC and Brasília) for all metric work (revised 2026-10-09; first version fixed 22S) | Official Brazilian datum; metres for lengths and APLS; a fixed 22S distorts cities in zone 23 |
 | 6 | IBGE graph from a rasterised street corridor and its skeleton, not by noding the face lines (2026-10-05) | IBGE publishes block faces (two parallel lines per street, cut at the corners), not centre lines, so noding gives two disconnected networks; the raster skeleton recovers one centre line and reuses the code that vectorises the CBERS-4A road masks in milestone 3, so APLS compares images, not vectorisers |
@@ -115,6 +116,8 @@ nodes over many origin-destination pairs, with paired tests across seeds.
 | 10 | Routed areas of one or more municipalities (`export/areas.py`); the ABC Paulista (7 municipalities) is one graph (2026-10-09) | Streets continue across municipal borders, so joining the faces before drawing the corridor connects them with no invented link |
 | 11 | Keep every connected part with at least 20 km of streets instead of only the largest (2026-10-09) | Roads without facing blocks (bridges, highways between Brasília's administrative regions) split cities: keeping only the largest part left 24% of Brasília's network (Taguatinga/Ceilândia, not the Plano Piloto) and 53% of Florianópolis'. With the rule: Brasília 75 parts, 9,265 km; Florianópolis 5 parts, 1,535 km. Routes between parts do not exist in these data and the web page says so |
 | 12 | `bridge_detours` pre-filters pairs with one bounded Dijkstra per source node | Links only shorten distances, so a pair short enough before any link stays so; equivalent result, needed for ~10^6 pairs in São Paulo |
+| 13 | `sources.osm` fetches only ways tagged one-way (`oneway`, roundabouts, motorways) through the Overpass API, in 0.2° tiles cached on disk, with pauses and retries on 429/504 (2026-10-10) | The geometry stays IBGE's; only the direction is borrowed, which keeps the download small (São Paulo: 76k ways) and the reuse within the ODbL (attribution on the map, derived graphs under the same licence) |
+| 14 | `graph.oneway` matches each IBGE edge to OSM segments sampled every 10 m within 12 m and 30°, accepting a direction when ≥ 60% of the samples match and ≥ 80% agree; samples that see both directions (two carriageways) count as conflicts; then a repair reverts one-way edges whose nodes fall outside the largest strongly connected component of their part (2026-10-10) | A geometric, local map matching (Quddus et al., 2007) is enough for two line sets of the same streets; the thresholds prefer leaving a street two-way to inventing a direction. The repair (Tarjan, 1972, via NetworkX) prevents dead ends created by partial matches; it reverted 0.5-21% of the matched edges per area |
 
 ## 6. Risks
 
@@ -138,6 +141,11 @@ web). ML-specific practice follows Sculley et al. (2015) and Breck et al. (2017)
 recorded, tests for data, model and infrastructure.
 
 ## References
+
+**Algorithms and data**
+- Quddus, M. A.; Ochieng, W. Y.; Noland, R. B. Current map-matching algorithms for transport applications: state-of-the art and future research directions. *Transportation Research Part C*, 15(5), 312-328, 2007.
+- Tarjan, R. Depth-first search and linear graph algorithms. *SIAM Journal on Computing*, 1(2), 146-160, 1972.
+- Open Data Commons Open Database License (ODbL) v1.0; OpenStreetMap Foundation, *Copyright and License*, openstreetmap.org/copyright.
 
 **Software engineering**
 - Bass, L.; Clements, P.; Kazman, R. *Software Architecture in Practice*. 4th ed. Addison-Wesley, 2021.

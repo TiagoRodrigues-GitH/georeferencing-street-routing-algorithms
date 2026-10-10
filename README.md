@@ -86,7 +86,7 @@ whose road distance is over 10x their gap are joined too, when the link crosses 
 150-600 m apart needing a detour over 5x: 13.9% -> 3.8%). Londrina: 10,640 junctions, 2,003 km in the routable
 network, 143 estimated links totalling 7.75 km (0.4%).
 
-## Data (Brazilian public sources only)
+## Data
 
 | Data | Publisher | Use | Licence |
 |---|---|---|---|
@@ -94,5 +94,26 @@ network, 143 estimated links totalling 7.75 km (0.4%).
 | Base de Faces de Logradouros, Censo 2022 (street lines per municipality) | IBGE | road labels, routing graph, reference for APLS | public (cite IBGE) |
 | Municipal boundary (Malha Municipal) | IBGE | area of interest | public (cite IBGE) |
 | Building labels | hand-annotated sample on CBERS-4A tiles | building class | this project |
+| `oneway` tags of OpenStreetMap ways (Overpass API) | OpenStreetMap contributors | direction of one-way streets only, matched to the IBGE edges | ODbL 1.0 (attribution: "© OpenStreetMap contributors") |
 
-One dataset family (INPE images + IBGE vectors) keeps the article's data reproducible and citable.
+One dataset family (INPE images + IBGE vectors) keeps the article's data reproducible and citable; OpenStreetMap
+supplies only the direction of one-way streets, which no Brazilian public source publishes (ADR 3, 13, 14).
+The graphs with directions are a derived database under the ODbL: they credit OpenStreetMap and are shared
+under the same licence.
+
+```
+python -m street_routing.sources.osm          # fetch and cache the one-way ways of every area (Overpass, polite pauses)
+python -m street_routing.export.oneway_web    # match them to the web graphs and write payload["oneway"]
+```
+
+| Area | OSM one-way ways | Edges matched | Reverted by the repair | One-way edges |
+|---|---:|---:|---:|---:|
+| Londrina | 4,414 | 2,565 of 16,526 | 119 | 2,446 |
+| Curitiba | 13,766 | 5,609 of 41,289 | 56 | 5,553 |
+| Florianópolis | 3,974 | 1,121 of 11,829 | 85 | 1,036 |
+| Brasília | 26,499 | 2,324 of 84,650 | 498 | 1,826 |
+| São Paulo | 76,103 | 21,565 of 165,108 | 170 | 21,395 |
+| ABC Paulista | 19,903 | 6,371 of 44,464 | 166 | 6,205 |
+
+Brasília matches least: its wide avenues and interchanges lie farther than the 12 m tolerance from the skeleton
+of the IBGE corridors, so many of them stay two-way.
