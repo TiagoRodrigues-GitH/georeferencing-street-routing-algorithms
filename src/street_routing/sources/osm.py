@@ -82,11 +82,11 @@ def tiles(bbox: tuple[float, float, float, float], size: float = TILE_DEG) -> li
     return [(w + i * dx, s + j * dy, w + (i + 1) * dx, s + (j + 1) * dy) for i in range(nx) for j in range(ny)]
 
 
-def _fetch(bbox: tuple[float, float, float, float], path: Path, retries: int = 4) -> dict:
+def _fetch(bbox: tuple[float, float, float, float], path: Path, retries: int = 4, query: str = QUERY) -> dict:
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     w, s, e, n = bbox
-    data = urllib.parse.urlencode({"data": QUERY.format(s=s, w=w, n=n, e=e)}).encode()
+    data = urllib.parse.urlencode({"data": query.format(s=s, w=w, n=n, e=e)}).encode()
     for attempt in range(retries):
         try:
             req = urllib.request.Request(OVERPASS, data=data, headers={"User-Agent": USER_AGENT})

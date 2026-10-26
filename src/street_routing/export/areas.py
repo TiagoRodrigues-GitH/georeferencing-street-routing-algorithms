@@ -21,6 +21,7 @@ class RoutedArea:
 AREAS: tuple[RoutedArea, ...] = (
     RoutedArea("4113700", "Londrina", "PR", (4113700,)),
     RoutedArea("4106902", "Curitiba", "PR", (4106902,)),
+    RoutedArea("4115200", "Maringá", "PR", (4115200,)),
     RoutedArea("4205407", "Florianópolis", "SC", (4205407,)),
     RoutedArea("5300108", "Brasília", "DF", (5300108,)),
     RoutedArea("3550308", "São Paulo", "SP", (3550308,)),

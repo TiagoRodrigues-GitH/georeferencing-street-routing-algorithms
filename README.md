@@ -104,7 +104,13 @@ under the same licence.
 ```
 python -m street_routing.sources.osm          # fetch and cache the one-way ways of every area (Overpass, polite pauses)
 python -m street_routing.export.oneway_web    # match them to the web graphs and write payload["oneway"]
+python -m street_routing.export.osm_links --area 5300108 --area 4115200   # join the parts with OSM roads
 ```
+
+Brasília falls apart into 75 parts (the largest with 26 % of the streets) because its highways and park avenues
+have no block faces; `export.osm_links` adds the OSM roads between the parts (motorway to unclassified, one-way
+kept), drops OSM roads that lead nowhere and keeps the largest strongly connected part: 96 % of the IBGE streets
+in one network. Maringá goes from 3 parts to 1 the same way.
 
 | Area | OSM one-way ways | Edges matched | Reverted by the repair | One-way edges |
 |---|---:|---:|---:|---:|
